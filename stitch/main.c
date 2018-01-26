@@ -9,7 +9,7 @@
 
 #include "sha256.h"
 
-#define STORE_DIR "/home/justin/packet-test"
+#define STORE_DIR "../packet-test"
 
 int main(int argc, char **argv)
 {
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
         sprintf(pktpath + strlen(pktpath), "/%lu.pkt", i);
 
         // Debug info
-        //printf("%s\n", pktpath);
+        printf("%s\n", pktpath);
 
         FILE *pktp = fopen(pktpath, "r");
         if (pktp == NULL) {

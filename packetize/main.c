@@ -14,7 +14,7 @@
 // 2^15 bytes, 32 kb
 #define PACKET_SIZE 0x8000
 
-#define STORE_DIR "/home/justin/packet-test"
+#define STORE_DIR "../packet-test"
 
 int main(int argc, char **argv)
 {
