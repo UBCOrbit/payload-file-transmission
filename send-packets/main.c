@@ -11,22 +11,14 @@
 #include <linux/limits.h>
 
 #include <crc32.h>
+#include <protocol.h>
 
 #define STORE_DIR "../packet-test"
 
-enum TransferCommands {
-    TRANSFER_START = 1,
-    TRANSFER_PACKET,
-    TRANSFER_NEXT,
-    TRANSFER_AGAIN,
-    TRANSFER_END,
-    TRANSFER_ERROR
-};
-
 int main(int argc, char **argv)
 {
-    if (argc < 3) {
-        printf("%s expects a sha256 sum and a file as arguments\n", argv[0]);
+    if (argc < 4) {
+        printf("%s expects a sha256 sum, an input serial, and an output serial\n", argv[0]);
         return 1;
     }
 
@@ -108,9 +100,18 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // Debug output
+    printf("opening pipe fds\n");
+
     // Open the file descriptor to send data across
-    int serialfd = open(argv[2], O_RDWR);
-    if (serialfd == -1) {
+    int outfd = open(argv[3], O_WRONLY);
+    if (outfd == -1) {
+        perror("open");
+        return 1;
+    }
+
+    int infd = open(argv[2], O_RDONLY);
+    if (infd == -1) {
         perror("open");
         return 1;
     }
@@ -132,10 +133,13 @@ int main(int argc, char **argv)
 
     memcpy(header + 17, shaSum, 32);
 
+    // Debug output
+    printf("writing header\n");
+
     // Write header
     size_t written = 0;
     while (written < sizeof(header)) {
-        ssize_t res = write(serialfd, header, sizeof(header));
+        ssize_t res = write(outfd, header, sizeof(header));
         if (res == -1) {
             perror("write");
             return 1;
@@ -143,6 +147,7 @@ int main(int argc, char **argv)
         written += res;
     }
 
+    // Write packets
     for (size_t i = 0; i < packetNum;) {
         char pktpath[PATH_MAX];
         strcpy(pktpath, pktdir);
@@ -190,10 +195,13 @@ int main(int argc, char **argv)
         uint32_t crc = crc32(pktData + 7, pktLen);
         memcpy(pktData + 3, &crc, 4);
 
+        // Debug info
+        printf("sending packet %lu.\n", i);
+
         // write the packet to the serial fd
         size_t pktWritten = 0;
         while (pktWritten < len + 7) {
-            ssize_t res = write(serialfd, pktData, len + 7);
+            ssize_t res = write(outfd, pktData, len + 7);
             if (res == -1) {
                 perror("write");
                 return 1;
@@ -204,7 +212,7 @@ int main(int argc, char **argv)
 
         // read the response from the other side
         uint8_t response = 0;
-        ssize_t res = read(serialfd, &response, 1);
+        ssize_t res = read(infd, &response, 1);
         if (res == -1) {
             perror("read");
             return 1;
@@ -233,11 +241,12 @@ int main(int argc, char **argv)
 
     // write the transfer end message
     uint8_t transEnd = TRANSFER_END;
-    ssize_t res = write(serialfd, &transEnd, 1);
+    ssize_t res = write(outfd, &transEnd, 1);
     if (res == -1) {
         perror("write");
         return 1;
     }
 
-    close(serialfd);
+    close(infd);
+    close(outfd);
 }

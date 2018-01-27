@@ -9,7 +9,7 @@
 
 #include "sha256.h"
 
-#define STORE_DIR "../packet-test"
+#define STORE_DIR "../packet-test2"
 
 int main(int argc, char **argv)
 {
