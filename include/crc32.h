@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-uin32_t crc32(uint8_t *data, size_t len);
+uint32_t crc32(uint8_t *data, size_t len);
 
 #endif // crc32_h_INCLUDED
 

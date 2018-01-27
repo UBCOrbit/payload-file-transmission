@@ -42,7 +42,6 @@ int main(int argc, char **argv)
     char *shaStr = argv[1];
 
     char pktdir[PATH_MAX] = STORE_DIR;
-    //strcat(pktdir, STORE_DIR);
     strcat(pktdir, "/");
     strcat(pktdir, shaStr);
 
