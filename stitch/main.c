@@ -9,10 +9,11 @@
 
 #include "sha256.h"
 
-#define STORE_DIR "../packet-test2"
+#define PACKET_DIR "received-packets"
 
 int main(int argc, char **argv)
 {
+    /*
     // TODO: proper argument parsing
     if (argc < 3) {
         printf("%s expects a sha256sum id and a path to store the stitched file as arguments.\n", argv[0]);
@@ -168,4 +169,5 @@ int main(int argc, char **argv)
     }
 
     free(data);
+    */
 }

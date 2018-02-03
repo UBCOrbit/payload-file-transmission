@@ -15,3 +15,8 @@ recv_pack_src = ['receive-packets/main.c']
 executable('stitch',       stitch_src,    include_directories : include, link_with : sha)
 executable('send-file',    send_file_src, include_directories : include, link_with : [sha, crc])
 executable('recv-packets', recv_pack_src, include_directories : include, link_with : [sha, crc])
+
+if get_option('build_tests')
+    executable('test-sha256', ['lib/sha256.c', 'lib/sha256_utils.c'], c_args : '-DSHA256_TEST')
+    executable('test-crc32',  ['lib/crc32.c'],                        c_args : '-DCRC32_TEST')
+endif

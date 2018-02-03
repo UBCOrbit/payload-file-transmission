@@ -78,7 +78,7 @@ void createMetadataFile(uint8_t shaSum[32], size_t fileLen, size_t packetNum)
         exit(-1);
     }
 
-    fprintf(metafp, "%s\n%lu\n%lu\n", shaStr, fileLen, packetNum);
+    fprintf(metafp, "%s\n%zu\n%zu\n", shaStr, fileLen, packetNum);
     fclose(metafp);
 }
 
@@ -91,19 +91,6 @@ void createPacketDirOrDie()
         exit(-1);
     }
 
-}
-
-void removeReceivingFiles()
-{
-    if (remove(RECEIVING_FILE) != 0) {
-        perror("Error removing \"" RECEIVING_FILE "\" file");
-        exit(-1);
-    }
-
-    if (remove(RECEIVED_PACKETS_DIR) != 0) {
-        perror("Error removing \"" RECEIVED_PACKETS_DIR "\" directory");
-        exit(-1);
-    }
 }
 
 void readPacketHeader(int serialfd, uint16_t *packetLen, uint32_t *crcSum)
@@ -144,7 +131,7 @@ void replyCommand(int serialfd, enum TransferCommands command)
     uint8_t command_8 = command;
     ssize_t result = write(serialfd, &command_8, 1);
     if (result == -1) {
-        perror("Error writing reply");
+        perror("Error writing reply command");
         exit(-1);
     }
 }
@@ -170,14 +157,27 @@ int main(int argc, char **argv)
     createMetadataFile(shaSum, fileLen, packetNum);
     createPacketDirOrDie();
 
+    // Debug info
+    printf("Received header, listening for packets...\n\n");
+
     // Read the packets
     for (size_t i = 0; i < packetNum;) {
         uint16_t packetLen;
         uint32_t crcSum;
         uint8_t *data;
 
+        // Debug info
+        printf("Listening for packet%zu...\n", i);
+
         readPacketHeader(serialfd, &packetLen, &crcSum);
+
+        // Debug info
+        printf("\tReceived header\n");
+
         data = readPacket(serialfd, packetLen);
+
+        // Debug info
+        printf("\tReceived packet data, sending reply...\n");
 
         // calculate the crc32sum on this end to verify packet integrity
         if (crcSum != crc32(data, packetLen)) {
@@ -191,10 +191,13 @@ int main(int argc, char **argv)
 
         replyCommand(serialfd, TRANSFER_NEXT);
 
+        // Debug info
+        printf("Packet intact, writing out to file\n");
+
         char packetPath[1024] = RECEIVED_PACKETS_DIR;
         strncat(packetPath, "/", sizeof(packetPath) - strlen(packetPath) - 1);
         snprintf(packetPath + strlen(packetPath), sizeof(packetPath) - strlen(packetPath),
-                 "%lu.pkt", i);
+                 "%zu.pkt", i);
 
         FILE *packetfp = fopen(packetPath, "w");
         if (packetfp == NULL) {
@@ -221,8 +224,6 @@ int main(int argc, char **argv)
         printf("Recieved erroneous command instead of TRANSFER_END.\n");
         exit(-1);
     }
-
-    removeReceivingFiles();
 
     close(serialfd);
 }

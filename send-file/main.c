@@ -184,8 +184,6 @@ int main(int argc, char **argv)
     char shaStr[65];
     int serialfd;
 
-    // Write out the file metadata
-    // TODO: check if a metadata already exists to send a specific error response
     fileData = readFile(argv[2], &fileLen);
 
     calculateSHA256(fileData, fileLen, shaSum);
@@ -204,9 +202,15 @@ int main(int argc, char **argv)
 
     writeHeader(serialfd, shaSum, fileLen, packetNum);
 
+    // Debug info
+    printf("Header written, sending packets...\n");
+
     for (size_t i = 0; i < packetNum;) {
         size_t offset = i * PACKET_SIZE;
         size_t packetLen = fileLen - offset > PACKET_SIZE ? PACKET_SIZE : fileLen - offset;
+
+        // Debug info
+        printf("Sending packet %zu\n", i);
 
         writePacket(serialfd, fileData + offset, packetLen);
         if (readResponse(serialfd))
