@@ -10,7 +10,7 @@ sha = static_library('sha256', sha_src)
 
 stitch_src    = ['stitch/main.c']
 send_file_src = ['send-file/main.c']
-recv_pack_src = ['recieve-packets/main.c']
+recv_pack_src = ['receive-packets/main.c']
 
 executable('stitch',       stitch_src,    include_directories : include, link_with : sha)
 executable('send-file',    send_file_src, include_directories : include, link_with : [sha, crc])
