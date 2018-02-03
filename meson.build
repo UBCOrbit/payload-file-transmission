@@ -1,16 +1,17 @@
 project('payload-file-transmission', 'c')
 
-include = include_directories('include')
+include = include_directories('lib')
 
-crc = static_library('crc32',  'lib/crc32.c',  include_directories : include)
-sha = static_library('sha256', 'lib/sha256.c', include_directories : include)
+crc_src = ['lib/crc32.c']
+sha_src = ['lib/sha256.c', 'lib/sha256_utils.c']
 
-packetize_src = ['packetize/main.c']
+crc = static_library('crc32',  crc_src)
+sha = static_library('sha256', sha_src)
+
 stitch_src    = ['stitch/main.c']
-send_pack_src = ['send-packets/main.c']
+send_file_src = ['send-file/main.c']
 recv_pack_src = ['recieve-packets/main.c']
 
-executable('packetize',    packetize_src, include_directories : include, link_with : sha)
 executable('stitch',       stitch_src,    include_directories : include, link_with : sha)
-executable('send-packets', send_pack_src, include_directories : include, link_with : crc)
-executable('recv-packets', recv_pack_src, include_directories : include, link_with : crc)
+executable('send-file',    send_file_src, include_directories : include, link_with : [sha, crc])
+executable('recv-packets', recv_pack_src, include_directories : include, link_with : [sha, crc])

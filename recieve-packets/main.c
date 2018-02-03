@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -9,210 +10,219 @@
 
 #include <fcntl.h>
 
-#include <linux/limits.h>
-
 #include <crc32.h>
 #include <protocol.h>
+#include <sha256_utils.h>
 
-#define STORE_DIR "../packet-test2"
+
+
+#define RECEIVING_FILE "receiving.meta"
+#define RECEIVED_PACKETS_DIR "received-packets"
+
+void readAllOrDie(int fd, uint8_t *buf, size_t len)
+{
+    size_t readAmt = 0;
+    ssize_t result;
+    while (readAmt < len) {
+        result = read(fd, buf, len);
+        if (result == -1) {
+            perror("Error reading file descriptor");
+            exit(-1);
+        }
+        readAmt += result;
+    }
+}
+
+void readHeader(int serialfd, uint8_t shaSum[32], size_t *fileSize, size_t *numPackets)
+{
+    uint8_t command;
+    uint8_t inBuf[48];
+    ssize_t result;
+
+    // Header format:
+    //  * 1 byte for TRANSFER_START
+    //  * 8 bytes for file size in bytes
+    //  * 8 bytes for number of packets
+    //  * 32 bytes for sha256sum
+
+    result = read(serialfd, &command, 1);
+    if (result == -1) {
+        perror("Error reading header command");
+        exit(-1);
+    }
+
+    if (command != TRANSFER_START) {
+        printf("Recieved erroneous command instead of TRANSFER_START\n");
+        exit(-1);
+    }
+
+    readAllOrDie(serialfd, inBuf, 48);
+
+    *fileSize = *((uint64_t*) (inBuf + 0));
+    *numPackets = *((uint64_t*) (inBuf + 8));
+    memcpy(shaSum, inBuf + 16, 32);
+}
+
+void createMetadataFile(uint8_t shaSum[32], size_t fileLen, size_t packetNum)
+{
+    char shaStr[65];
+    FILE *metafp;
+
+    sha256Str(shaStr, shaSum);
+
+    // TODO: check if the file exists already to handle resuming transfers
+    //       otherwise this file would be pointless
+    metafp = fopen(RECEIVING_FILE, "w");
+    if (metafp == NULL) {
+        perror("Error creating recieving metadata file");
+        exit(-1);
+    }
+
+    fprintf(metafp, "%s\n%lu\n%lu\n", shaStr, fileLen, packetNum);
+    fclose(metafp);
+}
+
+void createPacketDirOrDie()
+{
+    // make sure the dir doesn't exist
+    int dirRes = mkdir(RECEIVED_PACKETS_DIR, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    if (dirRes == -1) {
+        perror("Error making packet directory");
+        exit(-1);
+    }
+
+}
+
+void removeReceivingFiles()
+{
+    if (remove(RECEIVING_FILE) != 0) {
+        perror("Error removing \"" RECEIVING_FILE "\" file");
+        exit(-1);
+    }
+
+    if (remove(RECEIVED_PACKETS_DIR) != 0) {
+        perror("Error removing \"" RECEIVED_PACKETS_DIR "\" directory");
+        exit(-1);
+    }
+}
+
+void readPacketHeader(int serialfd, uint16_t *packetLen, uint32_t *crcSum)
+{
+    uint8_t pktCommand = 0;
+    ssize_t pktRes = read(serialfd, &pktCommand, 1);
+    if (pktRes == -1) {
+        perror("Error reading packet command");
+        exit(-1);
+    }
+
+    if (pktCommand == TRANSFER_END) {
+        printf("Recieved a premature transfer_end command.\n");
+        exit(-1);
+    } else if (pktCommand != TRANSFER_PACKET) {
+        printf("Recieved erroneous command instead of transfer_packet.\n");
+        exit(-1);
+    }
+
+    // read packet header
+    uint8_t pktHeader[6];
+    readAllOrDie(serialfd, pktHeader, 6);
+
+    *packetLen = *((uint16_t *) (pktHeader + 0));
+    *crcSum    = *((uint32_t *) (pktHeader + 2));
+}
+
+uint8_t* readPacket(int serialfd, size_t packetLen)
+{
+    uint8_t *data = malloc(packetLen);
+    readAllOrDie(serialfd, data, packetLen);
+
+    return data;
+}
+
+void replyCommand(int serialfd, enum TransferCommands command)
+{
+    uint8_t command_8 = command;
+    ssize_t result = write(serialfd, &command_8, 1);
+    if (result == -1) {
+        perror("Error writing reply");
+        exit(-1);
+    }
+}
 
 int main(int argc, char **argv)
 {
-    if (argc < 3) {
-        printf("%s expects an input pipe and an output pipe.\n", argv[0]);
-        return 1;
+    if (argc < 2) {
+        printf("%s expects a serial device to read from.\n", argv[0]);
+        exit(-1);
     }
 
-    int infd = open(argv[1], O_RDONLY);
-    if (infd == -1) {
-        perror("open");
-        return 1;
-    }
-
-    int outfd = open(argv[2], O_WRONLY);
-    if (outfd == -1) {
-        perror("open");
-        return 1;
-    }
-
-    uint8_t command = 0;
-    ssize_t res = read(infd, &command, 1);
-    if (res == -1) {
-        perror("read");
-        return 1;
-    }
-
-    // If the command isn't transfer start, the command is invalid
-    if (command != TRANSFER_START) {
-        printf("Recieved erroneous message instead of transfer_start.\n");
-        return 1;
-    }
-
-    // read the transfer start header
-    uint8_t header[48];
-    size_t amtRead = 0;
-    while (amtRead < 48) {
-        ssize_t hRes = read(infd, header + amtRead, 48 - amtRead);
-        if (hRes == -1) {
-            perror("read");
-            return 1;
-        }
-        amtRead += hRes;
-    }
-
-    size_t fileSize  = *((uint64_t *) (header + 0));
-    size_t packetNum = *((uint64_t *) (header + 8));
-
+    size_t fileLen, packetNum;
     uint8_t shaSum[32];
-    memcpy(shaSum, header + 16, 32);
+    int serialfd;
 
-    char shaStr[65];
-    for (size_t i = 0; i < 32; ++i)
-        sprintf(shaStr + 2*i, "%02x", shaSum[i]);
-
-    shaStr[64] = '\0';
-
-    // Debug info
-    printf("%s\n", shaStr);
-
-    char pktDir[PATH_MAX] = STORE_DIR;
-    strcat(pktDir, "/");
-    strcat(pktDir, shaStr);
-
-    // make sure the dir doesn't exist
-    // TODO: transfer resume functionality
-    int dirRes = mkdir(pktDir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    if (dirRes == -1) {
-        perror("mkdir");
-        return 1;
+    serialfd = open(argv[1], O_RDWR);
+    if (serialfd == -1) {
+        perror("Error opening serial device");
+        exit(-1);
     }
 
-    // Create metadata file
-    char metaPath[PATH_MAX];
-    strcpy(metaPath, pktDir);
-    strcat(metaPath, ".meta");
+    readHeader(serialfd, shaSum, &fileLen, &packetNum);
+    createMetadataFile(shaSum, fileLen, packetNum);
+    createPacketDirOrDie();
 
-    FILE *metafp = fopen(metaPath, "w");
-    if (metafp == NULL) {
-        perror("fopen");
-        return 1;
-    }
-
-    fprintf(metafp, "%lu\n%lu\n", fileSize, packetNum);
-    fclose(metafp);
-
-    // Start reading packets
+    // Read the packets
     for (size_t i = 0; i < packetNum;) {
-        // Debug info
-        printf("recieving packet %lu.\n", i);
+        uint16_t packetLen;
+        uint32_t crcSum;
+        uint8_t *data;
 
-        uint8_t pktCommand = 0;
-        ssize_t pktRes = read(infd, &pktCommand, 1);
-        if (pktRes == -1) {
-            perror("read");
-            return 1;
-        }
-
-        if (pktCommand == TRANSFER_END) {
-            printf("Recieved a premature transfer_end command.\n");
-            return 1;
-        } else if (pktCommand != TRANSFER_PACKET) {
-            printf("Recieved erroneous command instead of transfer_packet.\n");
-            return 1;
-        }
-
-        // read packet header
-        uint8_t pktHeader[6];
-        size_t pktAmtRead = 0;
-        while (pktAmtRead < 6) {
-            pktRes = read(infd, pktHeader, 6 - pktAmtRead);
-            if (pktRes == -1) {
-                perror("read");
-                return 1;
-            }
-            pktAmtRead += pktRes;
-        }
-
-        uint16_t packetLen = *((uint16_t *) (pktHeader + 0));
-        uint32_t crcSum    = *((uint32_t *) (pktHeader + 2));
-
-        uint8_t *pktData = malloc(packetLen);
-
-        // read packet data
-        pktAmtRead = 0;
-        while (pktAmtRead < packetLen) {
-            pktRes = read(infd, pktData, packetLen - pktAmtRead);
-            if (pktRes == -1) {
-                perror("read");
-                return 1;
-            }
-            pktAmtRead += pktRes;
-        }
+        readPacketHeader(serialfd, &packetLen, &crcSum);
+        data = readPacket(serialfd, packetLen);
 
         // calculate the crc32sum on this end to verify packet integrity
-        uint32_t crcSumCalc = crc32(pktData, packetLen);
-
-        // if packet is intact, increment i and send TRANSFER_NEXT
-        // otherwise send TRANSFER_AGAIN
-        uint8_t pktSendCmd = TRANSFER_NEXT;
-        if (crcSum != crcSumCalc) {
-            printf("Error recieving packet: calculated crc32sum %u differs from given %u.\n",
-                   crcSumCalc, crcSum);
-            pktSendCmd = TRANSFER_AGAIN;
-        }
-
-        pktRes = write(outfd, &pktSendCmd, 1);
-        if (pktRes == -1) {
-            perror("write");
-            return 1;
-        }
-
-        // if the packet wasn't intact, then it shouldn't be written
-        // this is fugly af, but idc
-        if (pktSendCmd == TRANSFER_AGAIN) {
-            free(pktData);
+        if (crcSum != crc32(data, packetLen)) {
+            // If the calculated crc32sum differs from given,
+            // request that the packet is sent again
+            printf("Error receiving packet: calculated crc32sum differs from given.\n");
+            replyCommand(serialfd, TRANSFER_AGAIN);
+            free(data);
             continue;
         }
 
-        // write the packet data to the specified file
-        char pktpath[PATH_MAX];
-        strcpy(pktpath, pktDir);
-        sprintf(pktpath + strlen(pktpath), "/%lu.pkt", i);
+        replyCommand(serialfd, TRANSFER_NEXT);
 
-        FILE *pktp = fopen(pktpath, "w");
-        if (pktp == NULL) {
-            perror("fopen");
-            printf("Error opening packet file for write: %s.\n", pktpath);
-            return 1;
+        char packetPath[1024] = RECEIVED_PACKETS_DIR;
+        strncat(packetPath, "/", sizeof(packetPath) - strlen(packetPath) - 1);
+        snprintf(packetPath + strlen(packetPath), sizeof(packetPath) - strlen(packetPath),
+                 "%lu.pkt", i);
+
+        FILE *packetfp = fopen(packetPath, "w");
+        if (packetfp == NULL) {
+            perror("Error opening packet file for write");
+            exit(-1);
         }
 
-        // Debug info
-        printf("Packet: %lu, %u\n", i, packetLen);
-
-        size_t written = fwrite(pktData, 1, packetLen, pktp);
-        if (written != packetLen) {
-            printf("Error writing data to pktet file: %s.\n", pktpath);
-            return 1;
-        }
-
-        fclose(pktp);
-        free(pktData);
+        fwrite(data, 1, packetLen, packetfp);
+        fclose(packetfp);
+        free(data);
 
         i += 1;
     }
 
-    // read the transfer_end command
-    res = read(infd, &command, 1);
-    if (res == -1) {
+    // read the TRANSFER_END command
+    uint8_t command;
+    ssize_t result = read(serialfd, &command, 1);
+    if (result == -1) {
         perror("read");
-        return 1;
+        exit(-1);
     }
 
     if (command != TRANSFER_END) {
-        printf("Recieved erroneous command instead of transfer_end.\n");
-        return 1;
+        printf("Recieved erroneous command instead of TRANSFER_END.\n");
+        exit(-1);
     }
 
-    close(infd);
-    close(outfd);
+    removeReceivingFiles();
+
+    close(serialfd);
 }

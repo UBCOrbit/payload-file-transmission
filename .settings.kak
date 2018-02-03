@@ -1,4 +1,4 @@
-decl str include_dir %sh{echo `dirname $kak_source`/include}
+decl str include_dir %sh{echo `dirname $kak_source`/lib}
 
 hook global WinSetOption filetype=(c|cpp) %{
     clang-enable-autocomplete

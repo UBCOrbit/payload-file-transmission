@@ -61,7 +61,7 @@ static uint_fast32_t const crctab[256] =
   0xa2f33668, 0xbcb4666d, 0xb8757bda, 0xb5365d03, 0xb1f740b4
 };
 
-uint32_t crc32(uint8_t *data, size_t len)
+uint32_t crc32(const uint8_t *data, size_t len)
 {
     size_t i;
     uint_fast32_t crc = 0;
