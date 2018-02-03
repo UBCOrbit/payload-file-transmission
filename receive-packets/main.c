@@ -24,7 +24,7 @@ void readAllOrDie(int fd, uint8_t *buf, size_t len)
     size_t readAmt = 0;
     ssize_t result;
     while (readAmt < len) {
-        result = read(fd, buf, len);
+        result = read(fd, buf + readAmt, len - readAmt);
         if (result == -1) {
             perror("Error reading file descriptor");
             exit(-1);
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
         readPacketHeader(serialfd, &packetLen, &crcSum);
 
         // Debug info
-        printf("\tReceived header\n");
+        printf("\tReceived header: %u, %u\n", packetLen, crcSum);
 
         data = readPacket(serialfd, packetLen);
 

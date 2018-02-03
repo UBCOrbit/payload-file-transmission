@@ -79,7 +79,7 @@ void writeAllOrDie(int fd, const uint8_t *data, size_t dataLen)
     ssize_t result;
 
     while (written < dataLen) {
-        result = write(fd, data, dataLen - written);
+        result = write(fd, data + written, dataLen - written);
         if (result == -1) {
             perror("Error writing data to file descriptor");
             exit(-1);
@@ -131,6 +131,9 @@ void writePacket(int serialfd, const uint8_t *packetData, size_t packetLen)
     memcpy(outBuf + 1, &packetLen_16, 2);
     memcpy(outBuf + 3, &crcSum, 4);
     memcpy(outBuf + 7, packetData, packetLen);
+
+    // Debug info
+    printf("\tSending packet: %u, %u\n", packetLen_16, crcSum);
 
     writeAllOrDie(serialfd, outBuf, 7 + packetLen);
 
