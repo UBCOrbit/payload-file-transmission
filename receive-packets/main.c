@@ -126,10 +126,9 @@ uint8_t* readPacket(int serialfd, size_t packetLen)
     return data;
 }
 
-void replyCommand(int serialfd, enum TransferCommands command)
+void replyCommand(int serialfd, uint8_t command)
 {
-    uint8_t command_8 = command;
-    ssize_t result = write(serialfd, &command_8, 1);
+    ssize_t result = write(serialfd, &command, 1);
     if (result == -1) {
         perror("Error writing reply command");
         exit(-1);

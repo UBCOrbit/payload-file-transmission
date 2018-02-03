@@ -163,13 +163,13 @@ bool readResponse(int serialfd)
             return false;
             break;
         case TRANSFER_END:
-            printf("Recieved premature TRANSFER_END response\n");
+            printf("Received premature TRANSFER_END response\n");
             exit(-1);
         case TRANSFER_ERROR:
-            printf("Recieved TRANSFER_ERROR response\n");
+            printf("Received TRANSFER_ERROR response\n");
             exit(-1);
         default:
-            printf("Recieved erroneous transfer response\n");
+            printf("Received erroneous transfer response\n");
             exit(-1);
     }
 }
