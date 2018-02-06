@@ -21,15 +21,15 @@
 
 void readAllOrDie(int fd, uint8_t *buf, size_t len)
 {
-    size_t readAmt = 0;
+    size_t offset = 0;
     ssize_t result;
-    while (readAmt < len) {
-        result = read(fd, buf + readAmt, len - readAmt);
+    while (offset < len) {
+        result = read(fd, buf + offset, len - offset);
         if (result == -1) {
             perror("Error reading file descriptor");
             exit(-1);
         }
-        readAmt += result;
+        offset += result;
     }
 }
 
@@ -58,8 +58,10 @@ void readHeader(int serialfd, uint8_t shaSum[32], size_t *fileSize, size_t *numP
 
     readAllOrDie(serialfd, inBuf, 48);
 
-    *fileSize = *((uint64_t*) (inBuf + 0));
-    *numPackets = *((uint64_t*) (inBuf + 8));
+    //*fileSize = *((uint64_t*) (inBuf + 0));
+    //*numPackets = *((uint64_t*) (inBuf + 8));
+    memcpy(fileSize, inBuf + 0, 8);
+    memcpy(numPackets, inBuf + 8, 8);
     memcpy(shaSum, inBuf + 16, 32);
 }
 
@@ -114,8 +116,10 @@ void readPacketHeader(int serialfd, uint16_t *packetLen, uint32_t *crcSum)
     uint8_t pktHeader[6];
     readAllOrDie(serialfd, pktHeader, 6);
 
-    *packetLen = *((uint16_t *) (pktHeader + 0));
-    *crcSum    = *((uint32_t *) (pktHeader + 2));
+    //*packetLen = *((uint16_t *) (pktHeader + 0));
+    //*crcSum    = *((uint32_t *) (pktHeader + 2));
+    memcpy(packetLen, pktHeader + 0, 2);
+    memcpy(crcSum, pktHeader + 2, 4);
 }
 
 uint8_t* readPacket(int serialfd, size_t packetLen)
