@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <fcntl.h>
+#include <getopt.h>
 #include <unistd.h>
 
 #include <sys/stat.h>
@@ -29,20 +30,14 @@ long fileLength(FILE *fp)
     return len;
 }
 
-uint8_t* readFile(char *filePath, size_t *size)
+uint8_t* readFile(FILE *fp, size_t *size)
 {
-    FILE *fp = fopen(filePath, "r");
-    if (fp == NULL) {
-        perror("Error opening file");
-        exit(-1);
-    }
-
     long len = fileLength(fp);
 
     uint8_t *data = malloc(len);
     size_t read = fread(data, 1, len, fp);
     if (read != len) {
-        printf("Error reading file %s.\n", filePath);
+        printf("Error reading file\n");
         exit(-1);
     }
     fclose(fp);
@@ -51,7 +46,7 @@ uint8_t* readFile(char *filePath, size_t *size)
     return data;
 }
 
-void writeMetadataFile(char shaStr[65], const char *filename)
+/*void writeMetadataFile(char shaStr[65], const char *filename)
 {
     char *metaPath = "sending.meta";
 
@@ -71,7 +66,7 @@ void deleteMetadataFile()
         perror("Error removing sending metadata file");
         exit(-1);
     }
-}
+}*/
 
 void writeAllOrDie(int fd, const uint8_t *data, size_t dataLen)
 {
@@ -176,39 +171,79 @@ bool readResponse(int serialfd)
 
 int main(int argc, char **argv)
 {
-    if (argc < 3) {
-        printf("%s expects a serial port and a file to send across.\n", argv[0]);
+    FILE *file = stdin;
+    size_t start = 0;
+
+    int c = 0;
+    while (true) {
+        static struct option long_options[] = {
+            {"file",  required_argument, 0, 'f'},
+            {"start", required_argument, 0, 's'},
+            {0, 0, 0, 0}
+        };
+
+        int option_index = 0;
+        c = getopt_long(argc, argv, "f:s:", long_options, &option_index);
+        if (c == -1)
+            break;
+
+        switch (c) {
+            case 'f':
+                file = fopen(optarg, "r");
+                if (file == NULL) {
+                    perror("Error opening file");
+                    exit(-1);
+                }
+                break;
+            case 's':
+                start = strtoul(optarg, NULL, 0);
+                break;
+        }
+    }
+
+    if (optind == argc) {
+        printf("%s expects a serial port to communicate across\n", argv[0]);
         return -1;
     }
 
     size_t fileLen, packetNum;
     uint8_t *fileData;
-    uint8_t shaSum[32];
-    char shaStr[65];
     int serialfd;
 
-    fileData = readFile(argv[2], &fileLen);
+    fileData = readFile(file, &fileLen);
+    packetNum = fileLen / PACKET_SIZE + (fileLen % PACKET_SIZE == 0 ? 0 : 1);
 
-    calculateSHA256(fileData, fileLen, shaSum);
-    sha256Str(shaStr, shaSum);
+    if (start >= packetNum) {
+        printf("Given a start packet that is greater than the total number of packets for that file\n");
+        exit(-1);
+    }
 
-    writeMetadataFile(shaStr, argv[2]);
-
-    // Send the packets over the serial port
-    serialfd = open(argv[1], O_RDWR);
+    serialfd = open(argv[optind], O_RDWR);
     if (serialfd == -1) {
         perror("Error opening serial port");
         exit(-1);
     }
 
-    packetNum = fileLen / PACKET_SIZE + (fileLen % PACKET_SIZE == 0 ? 0 : 1);
+    // If this is the start of the transfer, write out the header
+    if (start == 0) {
+        uint8_t shaSum[32];
+        char shaStr[65];
 
-    writeHeader(serialfd, shaSum, fileLen, packetNum);
+        calculateSHA256(fileData, fileLen, shaSum);
+        sha256Str(shaStr, shaSum);
 
-    // Debug info
-    printf("Header written, sending packets...\n");
+        // I don't think the sending metadata file is necessary?
+        //writeMetadataFile(shaStr, argv[2]);
+        writeHeader(serialfd, shaSum, fileLen, packetNum);
 
-    for (size_t i = 0; i < packetNum;) {
+        // Debug info
+        printf("Header written, sending packets...\n");
+    } else {
+        // Debug info
+        printf("Resuming transfer at packet %zu\n", start);
+    }
+
+    for (size_t i = start; i < packetNum;) {
         size_t offset = i * PACKET_SIZE;
         size_t packetLen = fileLen - offset > PACKET_SIZE ? PACKET_SIZE : fileLen - offset;
 
@@ -221,6 +256,5 @@ int main(int argc, char **argv)
     }
 
     free(fileData);
-
-    deleteMetadataFile();
+    //deleteMetadataFile();
 }

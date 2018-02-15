@@ -3,7 +3,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <unistd.h>
+#include <getopt.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -17,7 +19,7 @@
 
 
 #define RECEIVING_FILE "receiving.meta"
-#define RECEIVED_PACKETS_DIR "received-packets"
+//#define RECEIVED_PACKETS_DIR "received-packets"
 
 void readAllOrDie(int fd, uint8_t *buf, size_t len)
 {
@@ -84,17 +86,6 @@ void createMetadataFile(uint8_t shaSum[32], size_t fileLen, size_t packetNum)
     fclose(metafp);
 }
 
-void createPacketDirOrDie()
-{
-    // make sure the dir doesn't exist
-    int dirRes = mkdir(RECEIVED_PACKETS_DIR, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    if (dirRes == -1) {
-        perror("Error making packet directory");
-        exit(-1);
-    }
-
-}
-
 void readPacketHeader(int serialfd, uint16_t *packetLen, uint32_t *crcSum)
 {
     uint8_t pktCommand = 0;
@@ -141,8 +132,34 @@ void replyCommand(int serialfd, uint8_t command)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        printf("%s expects a serial device to read from.\n", argv[0]);
+    char dir[1024] = "";
+    size_t start = 0;
+
+    int c = 0;
+    while (true) {
+        static struct option long_options[] = {
+            {"directory", required_argument, 0, 'd'},
+            {"start",     required_argument, 0, 's'},
+            {0, 0, 0, 0}
+        };
+
+        int option_index = 0;
+        c = getopt_long(argc, argv, "d:s:", long_options, &option_index);
+        if (c == -1)
+            break;
+
+        switch (c) {
+            case 'd':
+                strncpy(dir, optarg, sizeof(dir));
+                break;
+            case 's':
+                start = strtoul(optarg, NULL, 0);
+                break;
+        }
+    }
+
+    if (optind == argc) {
+        printf("%s expects a serial device to communicate across\n", argv[0]);
         exit(-1);
     }
 
@@ -158,13 +175,12 @@ int main(int argc, char **argv)
 
     readHeader(serialfd, shaSum, &fileLen, &packetNum);
     createMetadataFile(shaSum, fileLen, packetNum);
-    createPacketDirOrDie();
 
     // Debug info
     printf("Received header, listening for packets...\n\n");
 
     // Read the packets
-    for (size_t i = 0; i < packetNum;) {
+    for (size_t i = start; i < packetNum;) {
         uint16_t packetLen;
         uint32_t crcSum;
         uint8_t *data;
@@ -197,7 +213,8 @@ int main(int argc, char **argv)
         // Debug info
         printf("Packet intact, writing out to file\n");
 
-        char packetPath[1024] = RECEIVED_PACKETS_DIR;
+        char packetPath[1024];
+        strncpy(packetPath, dir, sizeof(packetPath));
         strncat(packetPath, "/", sizeof(packetPath) - strlen(packetPath) - 1);
         snprintf(packetPath + strlen(packetPath), sizeof(packetPath) - strlen(packetPath),
                  "%zu.pkt", i);
@@ -213,19 +230,6 @@ int main(int argc, char **argv)
         free(data);
 
         i += 1;
-    }
-
-    // read the TRANSFER_END command
-    uint8_t command;
-    ssize_t result = read(serialfd, &command, 1);
-    if (result == -1) {
-        perror("read");
-        exit(-1);
-    }
-
-    if (command != TRANSFER_END) {
-        printf("Recieved erroneous command instead of TRANSFER_END.\n");
-        exit(-1);
     }
 
     close(serialfd);
