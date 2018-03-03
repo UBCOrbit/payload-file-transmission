@@ -46,28 +46,6 @@ uint8_t* readFile(FILE *fp, size_t *size)
     return data;
 }
 
-/*void writeMetadataFile(char shaStr[65], const char *filename)
-{
-    char *metaPath = "sending.meta";
-
-    FILE *metafp = fopen(metaPath, "w");
-    if (metafp == NULL) {
-        perror("Error opening metadata file");
-        exit(-1);
-    }
-
-    fprintf(metafp, "%s\n%s\n", shaStr, filename);
-    fclose(metafp);
-}
-
-void deleteMetadataFile()
-{
-    if (remove("sending.meta") != 0) {
-        perror("Error removing sending metadata file");
-        exit(-1);
-    }
-}*/
-
 void writeAllOrDie(int fd, const uint8_t *data, size_t dataLen)
 {
     size_t written = 0;
@@ -169,6 +147,18 @@ bool readResponse(int serialfd)
     }
 }
 
+void writeProgress(char *filePath, size_t packet_index)
+{
+    FILE *fp = fopen("next-packet-out", "w");
+    fprintf(fp, "%s\n%zu\n", filePath, packet_index);
+    fclose(fp);
+}
+
+void eraseProgress()
+{
+    remove("next-packet-out");
+}
+
 int main(int argc, char **argv)
 {
     FILE *file = stdin;
@@ -224,6 +214,8 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
+    // parse progress here
+
     // If this is the start of the transfer, write out the header
     if (start == 0) {
         uint8_t shaSum[32];
@@ -232,8 +224,6 @@ int main(int argc, char **argv)
         calculateSHA256(fileData, fileLen, shaSum);
         sha256Str(shaStr, shaSum);
 
-        // I don't think the sending metadata file is necessary?
-        //writeMetadataFile(shaStr, argv[2]);
         writeHeader(serialfd, shaSum, fileLen, packetNum);
 
         // Debug info
@@ -256,5 +246,5 @@ int main(int argc, char **argv)
     }
 
     free(fileData);
-    //deleteMetadataFile();
+    eraseProgress();
 }

@@ -4,12 +4,15 @@
 // 2^15 bytes, 32 kb
 #define PACKET_SIZE 0x8000
 
-#define TRANSFER_START  1
-#define TRANSFER_PACKET 2
-#define TRANSFER_NEXT   3
-#define TRANSFER_AGAIN  4
-#define TRANSFER_END    5
-#define TRANSFER_ERROR  6
+#define START_DOWNLOAD 1
+#define START_UPLOAD   2
+#define REQUEST_PACKET   3
+#define SEND_PACKET     4
+#define CANCEL_UPLOAD   5
+#define CANCEL_DOWNLOAD 6
+
+#define ERROR_FILE_IO             1
+#define ERROR_ALREADY_DOWNLOADING 2
 
 #endif // protocol_h_INCLUDED
 
