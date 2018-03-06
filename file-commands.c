@@ -17,6 +17,7 @@
 long fileLength(FILE *fp)
 {
     if (fseek(fp, 0, SEEK_END) == -1) {
+        // TODO: proper error handling/return code
         perror("Error seeking file end");
         exit(-1);
     }
@@ -34,6 +35,7 @@ uint8_t* readFile(FILE *fp, size_t *size)
     uint8_t *data = malloc(len);
     size_t read = fread(data, 1, len, fp);
     if (read != len) {
+        // TODO: proper error handling/return code
         printf("Error reading file\n");
         exit(-1);
     }
@@ -43,45 +45,7 @@ uint8_t* readFile(FILE *fp, size_t *size)
     return data;
 }
 
-void writeAllOrDie(int fd, const uint8_t *data, size_t dataLen)
-{
-    size_t written = 0;
-    ssize_t result;
-
-    while (written < dataLen) {
-        result = write(fd, data + written, dataLen - written);
-        if (result == -1) {
-            perror("Error writing data to file descriptor");
-            exit(-1);
-        }
-        written += result;
-    }
-}
-
-void writeHeader(const uint8_t shaSum[32], size_t fileLen, size_t numPackets)
-{
-    uint64_t fileLen_64, numPackets_64;
-    uint8_t outBuf[49];
-
-    // Header format:
-    //  * 1 byte for TRANSFER_START
-    //  * 8 bytes for file size in bytes
-    //  * 8 bytes for number of packets
-    //  * 32 bytes for sha256sum
-
-    fileLen_64 = fileLen;
-    numPackets_64 = numPackets;
-
-    outBuf[0] = TRANSFER_DOWNLOAD;
-    memcpy(outBuf + 1, &fileLen_64, 8);
-    memcpy(outBuf + 9, &numPackets_64, 8);
-    memcpy(outBuf + 17, shaSum, 32);
-
-    //writeAllOrDie(serialfd, outBuf, 49);
-    // change to write message stuff
-}
-
-int startDownload(const uint8_t *buf, size_t buflen)
+struct reply startDownload(const uint8_t *buf, size_t buflen)
 {
     // Takes a file path, and writes out the header for the transfer of that file
 
@@ -98,13 +62,13 @@ int startDownload(const uint8_t *buf, size_t buflen)
     // If the file isn't actually open, return an error
     if (fp == NULL) {
         free(path);
-        return ERROR_FILE_IO;
+        return EMPTY_REPLY(ERROR_FILE_IO);
     }
 
     fileData = readFile(fp, &fileLen);
-    packetNum = fileLen / PACKET_SIZE + (fileLen % PACKET_SIZE == 0 ? 0 : 1);
-
     fclose(fp);
+
+    packetNum = fileLen / PACKET_SIZE + (fileLen % PACKET_SIZE == 0 ? 0 : 1);
 
     uint8_t shaSum[32];
     //char shaStr[65];
@@ -117,19 +81,18 @@ int startDownload(const uint8_t *buf, size_t buflen)
     // Create file transfer metadata files
     // if there are already metadata files then return an error code
     if (access(DOWNLOAD_FILEMETA, F_OK) == 0 || access(DOWNLOAD_PACKETNUM, F_OK) == 0)
-        return ERROR_ALREADY_DOWNLOADING;
+        return EMPTY_REPLY(ERROR_ALREADY_DOWNLOADING);
+
 
     // Open both download meta and download packet number, but if either don't open, io error
     FILE *downMeta = fopen(DOWNLOAD_FILEMETA, "w");
     if (downMeta == NULL)
-        return ERROR_FILE_IO;
+        return EMPTY_REPLY(ERROR_FILE_IO);
     FILE *downPacket = fopen(DOWNLOAD_PACKETNUM, "w");
-    if (downPacket == NULL)
-        return ERROR_FILE_IO;
-
-    // if either of the files aren't already open, return an io error
-    if (downMeta == NULL || downPacket == NULL)
-        return ERROR_FILE_IO;
+    if (downPacket == NULL) {
+        fclose(downMeta);
+        return EMPTY_REPLY(ERROR_FILE_IO);
+    }
 
     fputs(path, downMeta);
     uint64_t nextPacket = 0;
@@ -138,21 +101,39 @@ int startDownload(const uint8_t *buf, size_t buflen)
     fclose(downMeta);
     fclose(downPacket);
 
-    // TODO: replace with creating a struct/buffer containing the data
-    writeHeader(shaSum, fileLen, packetNum);
+    // create and return the formatted reply
+    // Download success reply format
+    //   8 bytes for file length
+    //   8 bytes for packet count
+    //   32 bytes for sha256sum
+    uint64_t fileLen_64 = fileLen;
+    uint64_t numPackets_64 = packetNum;
 
-    return 0;
+    struct reply r;
+    r.status = SUCCESS;
+    r.payloadLen = 48;
+    r.payload = malloc(48);
+
+    memcpy(r.payload + 0, &fileLen_64, 8);
+    memcpy(r.payload + 8, &numPackets_64, 8);
+    memcpy(r.payload + 16, shaSum, 32);
+
+    return r;
 }
 
-int startUpload(const uint8_t *buf, size_t buflen)
+struct reply startUpload(const uint8_t *buf, size_t buflen)
 {
+    // Upload payload format
+    //   8 bytes for file length
+    //   8 bytes for packet count
+    //   32 bytes for sha256sum
+    return EMPTY_REPLY(SUCCESS);
 }
 
-uint8_t fileCommand(uint8_t *buf, size_t buflen)
+void fileCommand(uint8_t *buf, size_t buflen)
 {
     uint8_t command = buf[0];
-    uint8_t returnCode = 0;
-    int (*func)(const uint8_t *, size_t);
+    struct reply (*func)(const uint8_t *, size_t);
     switch (command) {
         case START_DOWNLOAD:
             // start a file download from payload
@@ -176,5 +157,8 @@ uint8_t fileCommand(uint8_t *buf, size_t buflen)
             break;
     }
 
-    return func(buf + 1, buflen - 1);
+    struct reply r = func(buf + 1, buflen - 1);
+    // TODO: send the generated reply
+    if (r.payloadLen > 0)
+        free(r.payload);
 }
